@@ -1,0 +1,205 @@
+কন্টেইনার নেটওয়ার্কিং, 
+
+বাক্সে বাক্সে বন্দী নেটওয়ার্ক । শুনতেই মনে হয় মজার কিছু, তবে যারা বাক্সে রাখা এই নেটওয়ার্কিং এর কারিকুরি বোঝেন তাদের জন্যই । যারা তেমন বুঝতে পারেন না , তাদের কাছে অনেকটা প্যানডোরার বাক্সের মতই । খুললেই না জানি কী বিপদ বের হয়ে আসে । আসলে এই কন্টেইনার নেটওয়ার্কিং শুনতে যতটা জটিল শোনায় আসলে ততটা জটিল না, বরং সোজাসাপ্টাই বলা যায় । আমরা সহজভাবে চলুন এই জিনিসটা একটু বোঝার চেষ্টা করি । 
+
+কন্টেইনার আসলে তেমন ভয়ংকর কিছু না, এটা আসলে একদম একা থাকতে শিখে যাওয়া, অসামাজিক  কিছু লিনাক্সের প্রসেস, মানে আইসোলেটেড এবং রেস্ট্রিকটেড লিনাক্স প্রসেস । 
+এখন কন্টেইনার নেটওয়ার্কিং সমস্যা মোকাবেলা করার একটি সময় এসেছে। অথবা, আরও স্পষ্টভাবে, একটি একক-হোস্ট কন্টেইনার নেটওয়ার্কিং সমস্যা। এই সেশনে, আমরা নিচের প্রশ্নগুলোর উত্তর খোঁজার চেষ্টা করব:
+
+১. কীভাবে নেটওয়ার্ক রিসোর্সগুলোকে ভার্চুয়ালাইজ করা যায় যাতে কনটেইনারগুলি ভাবতে পারে তাদের প্রত্যেকের একটি ডেডিকেটেড নেটওয়ার্ক স্ট্যাক আছে?
+২. কীভাবে কন্টেইনারগুলোকে বন্ধুত্বপূর্ণ প্রতিবেশী বানানো যায়, একে অন্যের মধ্যে নাক গলাবে না  এবং ভাল কমিউনিকেশন স্কীল থাকবে?
+৩. বাক্সের ভেতর থেকে কীভাবে বাইরের দুনিয়াতে খবর পাঠানো যাবে?
+৪. বাইরের দুনিয়া থেকে কেউ কীভাবে কন্টেইনারে যোগাযোগ করতে পারবে?
+
+
+এই প্রশ্নের উত্তর দেওয়ার সময়, আমরা স্ট্যান্ডার্ড লিনাক্স টুল ব্যবহার করে স্ক্র্যাচ থেকে একটি কন্টেইনার নেটওয়ার্কিং সেটআপ করব। ফলস্বরূপ, এটি স্পষ্ট হয়ে উঠবে যে একক-হোস্ট কন্টেইনার নেটওয়ার্কিং সুপরিচিত লিনাক্স সুবিধাগুলির একটি সাধারণ সমন্বয় ছাড়া আর কিছুই নয় । আমরা ঘাটাঘাটি করব: 
+
+নেটওয়ার্ক নেইমস্পেস
+ভার্চুয়াল ইথারনেট ডিভাইস
+ভার্চুয়াল নেটওয়ার্ক সুইচ (ব্রীজ নেটওয়ার্ক)
+আইপি রাউটিং এবং নেটওয়ার্ক এডরেস ট্রান্সলেশন (ন্যাট) 
+
+একটা আশার কথা বলি, আপাতত এই মজার বিষয় শিখতে কোন কোডিং এর প্রয়োজন নেই ।
+
+বাজার সদাই
+
+যেকোন স্টেবল লিনাক্স ডিস্ট্রো দিয়েই কাজ করা যাবে । আমাদের উদাহরণের সবকিছুতে আমরা লিনাক্স ভ্যাগরান্ট সেন্টোস ৮ দিয়ে কাজ করেছি  । সবকিছু সহজসরল রাখার জন্য আমরা কন্টেইনার সলুশন ব্যবহার করছি না(ডকার বা ইত্যাদি) । পরিবর্তে, আমরা মৌলিক ধারণাগুলির উপর ফোকাস করব এবং আমাদের শেখার লক্ষ্যগুলি অর্জন করতে নূন্যতম টুলিং ব্যবহার করব।
+
+
+
+নেমস্পেস দিয়ে কন্টেইনারকে নেটওয়ার্ককে একঘরে করা
+
+লিনাক্সের নেটওয়ার্ক স্ট্যাক আসলে কী দিয়ে তৈরী? অবশ্যই কিছু নেটওয়ার্ক ডিভাইস নিয়ে । সাথে কিছু রাউটিং প্রটোকল, নেটফিল্টার, আইপি টেবিলের কিছু রুলস নিয়ে । 
+
+আমরা চট করে একটা নন-কম্প্রেহেনসিভ স্ক্রীপ্ট  লিখে ফেলতে পারি । 
+inspect-net-stack.sh
+#!/usr/bin/env bash
+echo "> Network devices"
+ip link
+
+echo -e "\n> Route table"
+ip route
+
+echo -e "\n> Iptables rules"
+iptables --list-rules
+এটা রান করার আগে আইপি টেবিলটা একটু বদলে আসা যাক, 
+$ sudo iptables -N ROOT_NS
+এর পর আমাদের আউটপুট হলো এরকম,
+$ sudo ./inspect-net-stack.sh
+> Network devices
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP mode DEFAULT group default qlen 1000
+    link/ether 52:54:00:e3:27:77 brd ff:ff:ff:ff:ff:ff
+> Route table
+default via 10.0.2.2 dev eth0 proto dhcp metric 100
+10.0.2.0/24 dev eth0 proto kernel scope link src 10.0.2.15 metric 100
+> Iptables rules
+-P INPUT ACCEPT
+-P FORWARD ACCEPT
+-P OUTPUT ACCEPT
+-N ROOT_NS
+
+আমরা এই আউটপুটে আগ্রহী কারণ আমরা নিশ্চিত করতে চাই যে আমরা এখন যে কন্টেইনারগুলি তৈরি করতে যাচ্ছি প্রতিটি একটি করে আলাদা নেটওয়ার্ক স্ট্যাক পাবে।
+আমরা অনেকেই হয়তো জানি যে কন্টেইনারকে আইসোলেট করতে লিনাক্সে ব্যবহৃত একটি নেমস্পেস হলো নেটওয়ার্ক নেমস্পেস । নেমস্পেস লজিক্যালি একটা নেটওয়ার্ক স্ট্যাক, যার নিজস্ব রাউটিং, ফায়ারওয়াল রুলস, নেটওয়ার্ক ডিভাইস থাকবে । আজকেস সেশনটা সহজ রাখার জন্য আমরা শুধু এই নেমস্পেসটা নিয়েই কাজ করব। পুরোপুরি আইসোলেটেড কন্টেইনার না তৈরী করে আমরা শুধু এই নেটওয়ার্ক স্ট্যাকের মধ্যে স্কোপটা রেস্ট্রিক্ট করে রাখব । 
+নেটওয়ার্ক নেমস্পেস তৈরী করে সেই সার্ভিস চালানোর জন্য কমান্ডগুলো হলো, 
+$ sudo ip netns add netns0
+$ ip netns
+netns0
+
+
+$ sudo nsenter --net=/var/run/netns/netns0 bash
+# The newly created bash process lives in netns0
+
+$ sudo ./inspect-net-stack.sh
+> Network devices
+1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+
+> Route table
+
+> Iptables rules
+-P INPUT ACCEPT
+-P FORWARD ACCEPT
+-P OUTPUT ACCEPT
+
+এই আউটপুট থেকে বুঝতে পারি যে সদ্য তৈরী করা এই bash প্রসেসটা একটা নতুন নেটওয়ার্ক স্ট্যাক দেখতে পাচ্ছে, এবং সেটা নিয়ে কাজ করবে । এই স্ট্যাকে কোন রাউটিং, ফায়ারওয়াল এসব কিছু নেই । শুধু একটা লুপব্যাক আইপি দেয়া আছে । নিচের ছবিটা দেখি,
+
+লিনাক্স মেশিনের ভেতরে মেইন বা রুট নেমস্পেস থাকবে, তার রাউটিং, ফায়ারওয়াল/আইপি টেবিল, নেটওয়ার্ক ডিভাইস ইত্যাদি থাকবে । এখন কন্টেইনারের জন্য নতুন যে নেমস্পেসটা তৈরী করলাম সেটার স্কোপ শুধু সেই কন্টেইনারের জন্য ফিক্সড করে দিয়েছি । এখন কন্টেইনারের ভেতরের প্রসেসগুলোর কাছে সেই নেমস্পেসটাই আসল, তারা শুধু সেই নেটওয়ার্ক স্ট্যাকই চিনবে । 
+
+বাক্সের সাথে বাক্সের মালিককে কানেক্ট করা, ভার্চুয়াল নেটওয়ার্ক ডিভাইস
+
+একটা ডেডিকেটেড নেটওয়ার্ক থেকে কোন লাভ নেই যদি না সেই নেটওয়ার্ক কোন নেটওয়ার্ক ডিভাইস ইউজ করে কমিউনিকেশন না করে । তবে সবসময় তো ফিজিক্যাল নেটওয়ার্ক ডিভাইস থাকবে না, যাই হোক লিনাক্স এই ক্ষেত্রে সাহায্যের হাত বাড়িয়ে দেয়, লিনাক্সে ভার্চুয়াল নেটওয়ার্ক ডিভাইস তৈরী করা যায়, যেটা আসল ডিভাইসের মতই কাজ করবে । এই ভার্চুয়াল ইথারনেট নেটওয়ার্ক ডিভাইস অনেকটা টানেলের মত কাজ করে । আমরা জানি টানেলের দু’টা মুখ থাকবে, ভার্চুয়াল ইথারনেট এইভাবে জোড়ায় জোড়ায় কাজ করে । কিভাবে করে সেটা আমরা একটু পরেই বুঝতে পারবো । 
+
+$ sudo ip link add veth0 type veth peer name ceth0
+
+এই কমান্ড দিয়ে আমরা এক জোড়া ভার্চুয়াল ইথারনেট ডিভাইস তৈরী করলাম, এরা একে অপরকে ছাড়া বাঁচতে পারবে না, তাই এরা একে অপরের সাথে কানেক্টেড । নাম গুলো ইচ্ছেমত নেয়া । 
+$ ip link
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP mode DEFAULT group default qlen 1000
+    link/ether 52:54:00:e3:27:77 brd ff:ff:ff:ff:ff:ff
+5: ceth0@veth0: <BROADCAST,MULTICAST,M-DOWN> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 66:2d:24:e3:49:3f brd ff:ff:ff:ff:ff:ff
+6: veth0@ceth0: <BROADCAST,MULTICAST,M-DOWN> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 96:e8:de:1d:22:e0 brd ff:ff:ff:ff:ff:ff
+তৈরী করার পরপর এই দুজন লিনাক্সের মেইন নেমস্পেসে বাড়ি বানায়, এই রুট নেমস্পেসকে আমাদের আগেই তৈরী করা রাখা বাক্সের সাথে কানেক্ট করতে হলে এ দুজনের একজনকে আমাদের নিয়ে যেতে হবে বাক্সের নেইমস্পেসে । 
+
+$ sudo ip link set ceth0 netns netns0
+
+# List all the devices to make sure one of them disappeared from the root stack
+$ ip link
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP mode DEFAULT group default qlen 1000
+    link/ether 52:54:00:e3:27:77 brd ff:ff:ff:ff:ff:ff
+6: veth0@if5: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 96:e8:de:1d:22:e0 brd ff:ff:ff:ff:ff:ff link-netns netns0
+
+
+আমরা ডিভাইসগুলো চালু করে আইপি এডরেস ঠিকমত বসানোর পর কোন প্যাকেট যেকোন একপাশ থেকে টানেলের মত অন্যপাশে পৌছে যাবে । 
+রুট নেমস্পেস থেকে শুরু করি, 
+
+$ sudo ip link set veth0 up
+$ sudo ip addr add 172.18.0.11/16 dev veth0
+
+অপর পাশে কে কী বলে দেখে আসি 
+$ sudo nsenter --net=/var/run/netns/netns0
+$ ip link set lo up  # whoops
+$ ip link set ceth0 up
+$ ip addr add 172.18.0.10/16 dev ceth0
+$ ip link
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+5: ceth0@if6: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 66:2d:24:e3:49:3f brd ff:ff:ff:ff:ff:ff link-netnsid 0
+আবার একটা ছবি থেকে ব‌োঝার চেষ্টা করি, 
+
+
+এখানে দেখতে পাই যে ceth0  বাক্সের ভেতর থেকে রুট নেমস্পেসের veth0 এর সাথে চিঠি চালাচালি করতে পারছে । 
+সব ঠিকঠাক মত কাজ করছে কিনা দেখে নেই ,
+
+# From `netns0`, ping root's veth0
+$ ping -c 2 172.18.0.11
+PING 172.18.0.11 (172.18.0.11) 56(84) bytes of data.
+64 bytes from 172.18.0.11: icmp_seq=1 ttl=64 time=0.038 ms
+64 bytes from 172.18.0.11: icmp_seq=2 ttl=64 time=0.040 ms
+
+--- 172.18.0.11 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 58ms
+rtt min/avg/max/mdev = 0.038/0.039/0.040/0.001 ms
+
+# Leave `netns0`
+$ exit
+
+# From root namespace, ping ceth0
+$ ping -c 2 172.18.0.10
+PING 172.18.0.10 (172.18.0.10) 56(84) bytes of data.
+64 bytes from 172.18.0.10: icmp_seq=1 ttl=64 time=0.073 ms
+64 bytes from 172.18.0.10: icmp_seq=2 ttl=64 time=0.046 ms
+
+--- 172.18.0.10 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 3ms
+rtt min/avg/max/mdev = 0.046/0.059/0.073/0.015 ms
+
+
+এখন ceth0 যদি অন্য কাউকে চিঠি দিতে চায় তাহলে কিন্তু পারবে না, 
+
+# Inside root namespace
+$ ip addr show dev eth0
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000
+    link/ether 52:54:00:e3:27:77 brd ff:ff:ff:ff:ff:ff
+    inet 10.0.2.15/24 brd 10.0.2.255 scope global dynamic noprefixroute eth0
+       valid_lft 84057sec preferred_lft 84057sec
+    inet6 fe80::5054:ff:fee3:2777/64 scope link
+       valid_lft forever preferred_lft forever
+
+# Remember this 10.0.2.15
+
+$ sudo nsenter --net=/var/run/netns/netns0
+
+# Try host's eth0
+$ ping 10.0.2.15
+connect: Network is unreachable
+
+# Try something from the Internet
+$ ping 8.8.8.8
+connect: Network is unreachable
+
+
+এটা আসলে সহজ কারণে, এখন পর্যন্ত ceth0  এর মনের মধ্যে অন্য কারও জায়গা নেই । মানে রাউটিং দেয়া নেই । 
+
+# From `netns0` namespace:
+$ ip route
+172.18.0.0/16 dev ceth0 proto kernel scope link src 172.18.0.10
+
+লিনাক্সে রাউটিং টেবিল রেডী করার জন্য অনেকগুলো উপায় আছে, এর মধ্যে একটা হলো সরাসরি যুক্ত থাকা নেটওয়ার্ক ডিভাইস থেকে রাউটিং খুজে নেয়া । খেয়াল করি যে, আমরা প্রথমে যখন netns0 নেমস্পেস তৈরী করি তখন তার রাউটিং টেবিলটি খালি ছিল । তারপর আমরা তাতে ceth0 যোগ করলাম আর তার মধ্যে 172.18.0.10/16 আইপি সেট করি । আমরা আইপি এডরেস এবং সাবনেট মাস্ক ব্যবহার করেছিলাম, তাই নেটওয়ার্ক স্ট্যাক এই ইন্টারফেস থেকে রাউটিং বের করে নিতে পেরেছে ।  172.18.0.10/16 নেটওয়ার্কে পাঠানো প্যাকেট এখন থেকে ceth0  হয়ে যাবে । অন্য বাকী সব প্যাকেট বাতিলের খাতায় চলে যাবে । একই ভাবে রুট নেমস্পেসেও একটা রাউটিং বসবে, 
+
+# From `root` namespace:
+$ ip route
+# ... omitted lines ...
+172.18.0.0/16 dev veth0 proto kernel scope link src 172.18.0.11
+
+
+বাক্স থেকে বাক্সে জোড়াতালি, ( ব্রীজ নেটওয়ার্ক ) 
+
+কন্টেইনার জিনিসটা ব্যবহার করার মূল উদ্দেশ্য হলো রিসোর্সগুলো যেন সবচেয়ে এফিশিয়েন্ট ভাবে শেয়ার করে ইউজ করা যায় । সুতারাং একটা মেশিনে একটা কন্টেইনার বসিয়ে কোন লাভ নেই, বরং কয়েকটা কন্টেইনার নিয়ে কাজ করাটাই বুদ্ধিমানের মত । তাই আমরা কাজের সময় দেখা যাবে যে একটা মেশিনে কয়েকটা আইসোলেটেড প্রসেস নিয়ে কাজ করব । আচ্ছা, তখন উপরের ভার্চুয়াল নেটওয়ার্ক ডিভাইস মেথডটা কেমন ভাবে কাজ করবে? 
