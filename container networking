@@ -189,6 +189,7 @@ $ sudo nsenter --net=/var/run/netns/netns1
 $ ip link set lo up
 $ ip link set ceth1 up
 $ ip addr add 172.18.0.20/16 dev ceth1
+
 কানেক্টিভিটি চেক করি, 
 
 # From `netns1` we cannot reach the root namespace!
@@ -245,5 +246,191 @@ $ ip route
 172.18.0.0/16 dev veth0 proto kernel scope link src 172.18.0.11
 172.18.0.0/16 dev veth1 proto kernel scope link src 172.18.0.21
  
-দুটো কন্টেইনার একই নেটওয়ার্কে আছে । 
+দুটো কন্টেইনার একই নেটওয়ার্কে আছে । কিন্তু রাউটিং এর কনফ্লিক্টের কারণে যখন সেকেন্ড কন্টেইনার থেকে veth1 এ যখন কমিউনিকেট করার ট্রাই করছে তখন প্রথম রাউটিং টা সিলেক্ট হওয়ার কারণে কানেকশন ব্রেক হয়ে যাচ্ছে । আমরা প্রথম রাউট টি ডিলিট করে দিলে পুরো সিনারিও টা উল্টে যাবে, তখন netns1  ঠিক হয়ে যাবে কিন্তু netns0  ঠিকমত কাজ করবে না । এখন এটার একটা সলিউশন হলো দুটো কন্টেইনারে দুটো আলাদা নেটওয়ার্কের আইপি বসানো । 
+ 
+বিভিন্ন সময়ে প্রয়োজন হতে পারে যে একটা হোস্টের মাল্টিপল কন্টেইনার একই নেটওয়ার্কে থাকবে । তখন আমাদের এই প্রবলেম সলভ করার জন্য় ইউজ করতে হবে Bridge Network । এটা একটা লেয়ার ২ সুইচের মত কাজ করে, সো ব্রীজ নেটওয়ার্ক তার সাথে কানেক্টেড সব ইন্টারফেসে প্যাকেট ফরোয়ার্ড করতে পারে । 
+ 
+এখন আগের সবকিছু ডিলিট করে আবার নতুন করে দুটো কন্টেইনার তৈরী করি, এবার veth0 আর veth1 ইন্টারফেসে কোন আইপি বসানো হয় নি । 
+$ sudo ip netns add netns0
+$ sudo ip link add veth0 type veth peer name ceth0
+$ sudo ip link set veth0 up
+$ sudo ip link set ceth0 netns netns0
+ 
+$ sudo nsenter --net=/var/run/netns/netns0
+$ ip link set lo up
+$ ip link set ceth0 up
+$ ip addr add 172.18.0.10/16 dev ceth0
+$ exit
+ 
+$ sudo ip netns add netns1
+$ sudo ip link add veth1 type veth peer name ceth1
+$ sudo ip link set veth1 up
+$ sudo ip link set ceth1 netns netns1
+ 
+$ sudo nsenter --net=/var/run/netns/netns1
+$ ip link set lo up
+$ ip link set ceth1 up
+$ ip addr add 172.18.0.20/16 dev ceth1
+$ exit
+ 
+হোস্ট মেশিনেও কোন রাউটিং দেয়া হয় নি । 
+$ ip route
+default via 10.0.2.2 dev eth0 proto dhcp metric 100
+10.0.2.0/24 dev eth0 proto kernel scope link src 10.0.2.15 metric 100
+ 
+এখন ব্রীজ নেটওয়ার্কটা তৈরী করলাম
+$ sudo ip link add br0 type bridge
+$ sudo ip link set br0 up
+ 
+ব্রীজ নেটওয়ার্কে veth0 আর veth1 ইন্টারফেস দুটো অ্যাড করি । 
+$ sudo ip link set veth0 master br0
+$ sudo ip link set veth1 master br0
+ 
+ 
+এবার দুটো কন্টেইনারের মধ্যে কানেক্টিভিটি চেক করি । 
+$ sudo nsenter --net=/var/run/netns/netns0
+$ ping -c 2 172.18.0.20
+PING 172.18.0.20 (172.18.0.20) 56(84) bytes of data.
+64 bytes from 172.18.0.20: icmp_seq=1 ttl=64 time=0.259 ms
+64 bytes from 172.18.0.20: icmp_seq=2 ttl=64 time=0.051 ms
+ 
+--- 172.18.0.20 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 2ms
+rtt min/avg/max/mdev = 0.051/0.155/0.259/0.104 ms
+ 
+$ sudo nsenter --net=/var/run/netns/netns1
+$ ping -c 2 172.18.0.10
+PING 172.18.0.10 (172.18.0.10) 56(84) bytes of data.
+64 bytes from 172.18.0.10: icmp_seq=1 ttl=64 time=0.037 ms
+64 bytes from 172.18.0.10: icmp_seq=2 ttl=64 time=0.089 ms
+ 
+--- 172.18.0.10 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 36ms
+rtt min/avg/max/mdev = 0.037/0.063/0.089/0.026 ms
+ 
+দেখতে পাচ্ছি সব ঠিকমত কাজ করছে, এক্ষেত্রে আমরা veth0 and veth1 কোন আইপি বসাইনি । ceth0 আর ceth1 ইন্টারফেস দুটো কনফিগার করা হয়েছে, এরা যেহেতু একই ব্রীজ নেটওয়ার্কের সুইচের থ্রু তে একই ইথারনেট সেগমেন্টে আছে এখানে তাই লেয়াল ২ কানেক্টিভিটি আছে । 
+$ sudo nsenter --net=/var/run/netns/netns0
+$ ip neigh
+172.18.0.20 dev ceth0 lladdr 6e:9c:ae:02:60:de STALE
+$ exit
+ 
+$ sudo nsenter --net=/var/run/netns/netns1
+$ ip neigh
+172.18.0.10 dev ceth1 lladdr 66:f3:8c:75:09:29 STALE
+$ exit
+ 
+ 
+হোস্টের সাথে কমিউনিকেশন রেডী করা 
+প্রথমে দেখি কন্টেইনার আর হোস্ট মেশিন কমিউনিকেট করতে পারে কিনা 
+$ sudo nsenter --net=/var/run/netns/netns0
+$ ping 10.0.2.15  # eth0 address
+connect: Network is unreachable
+
+এটার কারণ হলো  netns0 ইন্টারফেস এ রাউটিং দেয়া নাই
+$ ip route
+172.18.0.0/16 dev ceth0 proto kernel scope link src 172.18.0.10
+
+একই ভাবে হোস্ট নেটওয়ার্ক থেকে কন্টেইনারে কানেকশন পাওয়া যাচ্ছে না । 
+# Use exit to leave `netns0` first:
+$ ping -c 2 172.18.0.10
+PING 172.18.0.10 (172.18.0.10) 56(84) bytes of data.
+From 213.51.1.123 icmp_seq=1 Destination Net Unreachable
+From 213.51.1.123 icmp_seq=2 Destination Net Unreachable
+
+--- 172.18.0.10 ping statistics ---
+2 packets transmitted, 0 received, +2 errors, 100% packet loss, time 3ms
+
+$ ping -c 2 172.18.0.20
+PING 172.18.0.20 (172.18.0.20) 56(84) bytes of data.
+From 213.51.1.123 icmp_seq=1 Destination Net Unreachable
+From 213.51.1.123 icmp_seq=2 Destination Net Unreachable
+
+--- 172.18.0.20 ping statistics ---
+2 packets transmitted, 0 received, +2 errors, 100% packet loss, time 3ms
+
+হোস্ট আর কন্টেইনারের নেটওয়ার্ক কমিউনিকেট করার জন্য আমাদের ব্রীজ নেটওয়ার্ক ইন্টারফেসে আইপি বসাতে হবে । 
+$ sudo ip addr add 172.18.0.1/16 dev br0
+
+ব্রীজ ইন্টারফেসে আইপি বসানোর পর আমরা হোস্ট মেশিনের রাউটিং টেবিলে নতুন একটা এন্ট্রি পাব । 
+$ ip route
+# ... omitted lines ...
+172.18.0.0/16 dev br0 proto kernel scope link src 172.18.0.1
+
+$ ping -c 2 172.18.0.10
+PING 172.18.0.10 (172.18.0.10) 56(84) bytes of data.
+64 bytes from 172.18.0.10: icmp_seq=1 ttl=64 time=0.036 ms
+64 bytes from 172.18.0.10: icmp_seq=2 ttl=64 time=0.049 ms
+
+--- 172.18.0.10 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 11ms
+rtt min/avg/max/mdev = 0.036/0.042/0.049/0.009 ms
+
+$ ping -c 2 172.18.0.20
+PING 172.18.0.20 (172.18.0.20) 56(84) bytes of data.
+64 bytes from 172.18.0.20: icmp_seq=1 ttl=64 time=0.059 ms
+64 bytes from 172.18.0.20: icmp_seq=2 ttl=64 time=0.056 ms
+
+--- 172.18.0.20 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 4ms
+rtt min/avg/max/mdev = 0.056/0.057/0.059/0.007 ms
+
+কন্টেইনার থেকে এখনও হোস্টে কমিউনিকেট করা যাচ্ছে না । আমাদের eth0 ইন্টারফেসের জন্য কন্টেইনারের নেমস্পেসে ডিফল্ট রাউটিং বসাতে হবে ।
+ 
+$ sudo nsenter --net=/var/run/netns/netns0
+$ ip route add default via 172.18.0.1
+$ ping -c 2 10.0.2.15
+PING 10.0.2.15 (10.0.2.15) 56(84) bytes of data.
+64 bytes from 10.0.2.15: icmp_seq=1 ttl=64 time=0.036 ms
+64 bytes from 10.0.2.15: icmp_seq=2 ttl=64 time=0.053 ms
+
+--- 10.0.2.15 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 14ms
+rtt min/avg/max/mdev = 0.036/0.044/0.053/0.010 ms
+
+# And repeat the change for `netns1`
+
+এই কমান্ডের কারণে ব্রীজ ইন্টারফেসটি কন্টেইনারের জন্য ডিফল্ট গেটওয়ে হিসেবে কাজ করবে,  হোস্ট মেশিনের ইন্টারফেসটা রাউটারের মত কাজ করবে । 
+বাই ডিফল্ট লিনাক্সে প্যাকেট ফরওয়ার্ডিং বন্ধ করা থাকে, আমরা সার্ভিসটি চালু করি । 
+# In the root namespace
+sudo bash -c 'echo 1 > /proc/sys/net/ipv4/ip_forward'
+কানেক্টিভিটি চেক করে দেখি,
+$ sudo nsenter --net=/var/run/netns/netns0
+$ ping 8.8.8.8
+# hangs indefinitely long for me...
+ 
+এখনও ঠিকমত কাজ করছে না । 
+এটার কারণ হলো কন্টেইনার থেকে হোস্টের বাইরে প্যাকেট পাঠানো হলে সেই ডেস্টিনেশন সার্ভার থেকে কন্টেইনারে প্যাকেট আসতে পারছে না কন্টেইনারের আইপি প্রাইভেট হওয়ার কারণে । এই আইপিতে রাউটিং শুধুমাত্র কন্টেইনারে আছে । হোস্টের বাইরের নেটওয়ার্কের কাছে একইরকম আইপির অনেক রাউটিং থাকতে পারে, মানে রিয়েল নেটওয়ার্কে অনেক কন্টেইনারেই এই আইপি থাকতে পারে । এজন্য আমরা NAT সার্ভিস ইউজ করব । এটা কন্টেইনারের আউটবাউন্ড প্যাকেটের উপরে হোস্টের নেটওয়ার্ক ইন্টারফেসের ইনফরমেশন বসিয়ে দেয়, তাতে বাইরের নেটওয়ার্কে সেটা ট্রান্সলেট হয় হোস্টের ইন্টারফেস হিসেবে, একইভাবে বাইরের নেটওয়ার্ক থেকে কন্টেইনারে ইনবাউন্ড ট্রাফিকের জন্য সে কন্টেইনারের রাউটিং চেক করে কন্টেইনারে ফরওয়ার্ড করবে । 
+$ sudo iptables -t nat -A POSTROUTING -s 172.18.0.0/16 ! -o br0 -j MASQUERADE
+ 
+এবার আবার কানেকশন চেক করি
+$ sudo nsenter --net=/var/run/netns/netns0
+$ ping -c 2 8.8.8.8
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=61 time=43.2 ms
+64 bytes from 8.8.8.8: icmp_seq=2 ttl=61 time=36.8 ms
+ 
+--- 8.8.8.8 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 2ms
+rtt min/avg/max/mdev = 36.815/40.008/43.202/3.199 ms
+ 
+পোর্ট পাবলিশিং 
+ধরি আমাদের কন্টেইনারে মধ্যে একটা server রান করছে । 
+$ sudo nsenter --net=/var/run/netns/netns0
+$ python3 -m http.server --bind 172.18.0.10 5000
+হোস্ট থেকে কন্টেইনারের নেটওয়ার্ক আমরা reach করতে পারছি, কিন্তু যখন বাইরে ইন্টারনেট নেটওয়ার্ক বা রিয়েল ওয়ার্ল্ড সিনারিও তে সমস্যা হবে যে সেখানের কোন সেন্ডার কোন আইপিতে ট্রাফিক ফরোয়ার্ড করবে সেটা বুঝতে পারবে না । বাইরের নেটওয়ার্কে শুধুমাত্র হোস্টের eth0 ইন্টারফেসের আইপি জানে । এজন্য আমাদের কন্টেইনারের সার্ভারের পোর্ট eth0 ইন্টারফেসের মধ্যে পাবলিশ করতে হবে । 
+
+# External traffic
+sudo iptables -t nat -A PREROUTING -d 10.0.2.15 -p tcp -m tcp --dport 5000 -j DNAT --to-destination 172.18.0.10:5000
+
+# Local traffic (since it doesn't pass the PREROUTING chain)
+sudo iptables -t nat -A OUTPUT -d 10.0.2.15 -p tcp -m tcp --dport 5000 -j DNAT --to-destination 172.18.0.10:5000
+
+ব্রীজ নেটওয়ার্কের ইন্টারফেসে ট্রাফিক ইন্টারসেপ্ট চালু করি । 
+sudo modprobe br_netfilter
+
+Testing time!
+curl 10.0.2.15:5000
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+# ... omitted lines ...
+
 
