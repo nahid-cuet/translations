@@ -434,3 +434,71 @@ curl 10.0.2.15:5000
 # ... omitted lines ...
 
 
+Q/A
+
+
+কন্টেইনারের জন্য আলাদা নেটওয়ার্ক স্ট্যাক কিভাবে তৈরী করব?
+
+inspect-net-stack.sh
+#!/usr/bin/env bash
+echo "> Network devices"
+ip link
+
+echo -e "\n> Route table"
+ip route
+
+echo -e "\n> Iptables rules"
+iptables --list-rules
+
+২. নেটওয়ার্ক নেমস্পেস সার্ভিস চালু করার কমান্ড কী?
+$ sudo ip netns add netns0
+$ ip netns
+Netns0
+3. Virtual ethernet card কিসের মত কাজ করতে পারে?
+টানেলের মত
+৪. $ sudo ip link set ceth0 netns netns0
+
+# List all the devices to make sure one of them disappeared from the root stack
+$ ip link
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP mode DEFAULT group default qlen 1000
+    link/ether 52:54:00:e3:27:77 brd ff:ff:ff:ff:ff:ff
+6: veth0@if5: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 96:e8:de:1d:22:e0 brd ff:ff:ff:ff:ff:ff link-netns netns0
+
+এখানে ceth0  ইন্টারফেসটা কোন নেমস্পেস এ আছে?
+Netns0
+৫. $ sudo nsenter --net=/var/run/netns/netns0
+$ ip link set lo up  # whoops
+$ ip link set ceth0 up
+$ ip addr add 172.18.0.10/16 dev ceth0
+$ ip link
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+5: ceth0@if6: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 66:2d:24:e3:49:3f brd ff:ff:ff:ff:ff:ff link-netnsid 0
+উপরে 172.18.0.10/16 আইপি কোন ডিভাইসে বসানো হয়েছে?
+Ceth0
+
+৬. 
+$ ip route
+# ... omitted lines ...
+172.18.0.0/16 dev veth0 proto kernel scope link src 172.18.0.11
+172.18.0.0/16 dev veth1 proto kernel scope link src 172.18.0.21
+
+এখানে কী ধরণের সমস্যা তৈরী হয়েছে? 
+
+রাউটিং কনফ্লিক্ট হচ্ছে । 
+
+
+৭. ব্রীজ নেটওয়ার্ক কোন নেটওয়ার্ক ডিভাইসের মত কাজ করে?
+
+লেয়ার ২ সুইচ
+
+৮. ব্রীজ নেটওয়ার্কে একটা ইন্টারফেস কীভাবে অ্যাড করব?
+
+$ sudo ip link set veth0 master br0
+ 
+
+
